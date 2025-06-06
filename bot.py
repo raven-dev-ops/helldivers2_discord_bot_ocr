@@ -78,15 +78,12 @@ def validate_stat(field_name: str, raw_value: str):
 def build_single_embed(players_data: list, submitter_player_name: str) -> discord.Embed:
     """
     Builds ONE embed that shows the stats of ALL players in a single embed.
-    Title: 'GPT FLEET STAT EXTRACTION'
-    Description: 'Submitted by: <submitter_player_name>'
     """
     embed = discord.Embed(
         title="GPT FLEET STAT EXTRACTION",
         description=f"Submitted by: {submitter_player_name}",
         color=discord.Color.blue()
     )
-
     for index, player in enumerate(players_data, start=1):
         player_name = prevent_discord_formatting(player.get('player_name', 'Unknown'))
         clan_name = player.get('clan_name', 'N/A')
@@ -95,7 +92,7 @@ def build_single_embed(players_data: list, submitter_player_name: str) -> discor
         shots_fired = str(player.get('Shots Fired', 'N/A'))
         shots_hit = str(player.get('Shots Hit', 'N/A'))
         accuracy = str(player.get('Accuracy', 'N/A'))
-
+        melee_kills = str(player.get('Melee Kills', 'N/A'))
         player_info = (
             f"**Name**: {player_name}\n"
             f"**Clan**: {clan_name}\n"
@@ -103,9 +100,8 @@ def build_single_embed(players_data: list, submitter_player_name: str) -> discor
             f"**Deaths**: {deaths}\n"
             f"**Shots Fired**: {shots_fired}\n"
             f"**Shots Hit**: {shots_hit}\n"
-            f"**Accuracy**: {accuracy}"
-        )
-
+            f"**Accuracy**: {accuracy}\n"
+            f"**Melee Kills**: {melee_kills}\n")
         zero_vals = highlight_zero_values(player)
         if zero_vals:
             player_info += f"\n**Needs Confirmation**: {', '.join(zero_vals)}"
@@ -116,23 +112,21 @@ def build_single_embed(players_data: list, submitter_player_name: str) -> discor
 
 def build_monitor_embed(players_data: list, submitter_name: str) -> discord.Embed:
     """
-    Builds an embed for the final #monitor channel with final stats.
+    Builds an embed for the final #monitor channel.
     """
     embed = discord.Embed(
         title="Saved Results",
         description=f"Submitted by: {submitter_name}",
         color=discord.Color.green()
     )
-
     for index, player in enumerate(players_data, start=1):
         player_name = prevent_discord_formatting(player.get('player_name', 'Unknown'))
         clan_name = player.get('clan_name', 'N/A')
         kills = str(player.get('Kills', 'N/A'))
-        accuracy = str(player.get('Accuracy', 'N/A'))
+        deaths = str(player.get('Deaths', 'N/A'))
         shots_fired = str(player.get('Shots Fired', 'N/A'))
         shots_hit = str(player.get('Shots Hit', 'N/A'))
-        deaths = str(player.get('Deaths', 'N/A'))
-
+        accuracy = str(player.get('Accuracy', 'N/A'))
         final_info = (
             f"**Name**: {player_name}\n"
             f"**Clan**: {clan_name}\n"
@@ -141,8 +135,7 @@ def build_monitor_embed(players_data: list, submitter_name: str) -> discord.Embe
             f"**Shots Fired**: {shots_fired}\n"
             f"**Shots Hit**: {shots_hit}\n"
             f"**Deaths**: {deaths}\n"
-        )
-
+            f"**Melee Kills**: {melee_kills}\n")
         embed.add_field(name=f"Player {index}", value=final_info, inline=False)
 
     return embed
