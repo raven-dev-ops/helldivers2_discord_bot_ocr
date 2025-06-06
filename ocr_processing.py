@@ -225,16 +225,20 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     return player_data
 
 # =============================================================================
-# PARTIAL MATCHING LOGIC (WITH MINIMUM NAME LENGTH)
+# PARTIAL MATCHING LOGIC (IMPROVED)
 # =============================================================================
 
-def find_best_partial_match(ocr_name: str, registered_names: list[str], threshold: float = 70.0, min_len: int = 3):
+def find_best_partial_match(ocr_name: str, registered_names: list[str], threshold: float = 70.0, min_len: int = 4):
     """
     Attempts to find the best partial match for 'ocr_name' within 'registered_names'.
-    Will not match if ocr_name is too short.
+    Does NOT allow substring matches for names < min_len.
     """
     ocr_name = ocr_name.strip()
     if len(ocr_name) < min_len:
+        # Only allow exact (case-insensitive) match if the name is very short
+        for db_name in registered_names:
+            if ocr_name.lower() == db_name.lower():
+                return db_name, 100.0
         return None, 0.0
 
     best_match = None
@@ -244,8 +248,12 @@ def find_best_partial_match(ocr_name: str, registered_names: list[str], threshol
     for db_name in registered_names:
         db_name_lower = db_name.lower()
         ratio_full = SequenceMatcher(None, ocr_name_lower, db_name_lower).ratio() * 100
-        substring_bonus = 20 if (ocr_name_lower in db_name_lower or db_name_lower in ocr_name_lower) else 0
-        # Extra check: skip wildly different lengths
+        substring_bonus = 0
+        # Only give substring bonus if both names are at least min_len chars
+        if len(ocr_name_lower) >= min_len and len(db_name_lower) >= min_len:
+            if ocr_name_lower in db_name_lower or db_name_lower in ocr_name_lower:
+                substring_bonus = 20
+        # Also skip if wildly different lengths (optional, for extra safety)
         if abs(len(ocr_name_lower) - len(db_name_lower)) > 3:
             continue
         score = ratio_full + substring_bonus
