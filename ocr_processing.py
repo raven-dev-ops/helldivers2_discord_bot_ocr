@@ -115,8 +115,8 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     player_data = []
     for player_index in range(NUM_PLAYERS):
         player_stats = {}
-        shots_fired = 0
-        shots_hit = 0
+        shots_fired = None  # None for detection
+        shots_hit = None
         ocr_accuracy = None
 
         for key in ['Name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy', 'Melee Kills']:
@@ -171,6 +171,12 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             else:
                 player_stats[label] = cleaned_result
 
+        # Guarantee these fields are always present and integer
+        if shots_fired is None:
+            shots_fired = 0
+        if shots_hit is None:
+            shots_hit = 0
+
         # Correct Shots Hit if bigger than Shots Fired
         if shots_hit > shots_fired:
             logger.warning(
@@ -199,19 +205,12 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             formatted_player[field_key] = v
 
         # Ensure Shots Fired, Shots Hit, Melee Kills are integers
-        try:
-            formatted_player["Shots Fired"] = int(formatted_player.get("Shots Fired", 0))
-        except Exception:
-            formatted_player["Shots Fired"] = 0
-        try:
-            formatted_player["Shots Hit"] = int(formatted_player.get("Shots Hit", 0))
-        except Exception:
-            formatted_player["Shots Hit"] = 0
+        formatted_player["Shots Fired"] = int(shots_fired)
+        formatted_player["Shots Hit"] = int(shots_hit)
         try:
             formatted_player["Melee Kills"] = int(formatted_player.get("Melee Kills", 0))
         except Exception:
             formatted_player["Melee Kills"] = 0
-
         formatted_player["Accuracy"] = f"{accuracy:.1f}%"
 
         # Only append if the player_name is real (not blank, "0", ".", or "a")
