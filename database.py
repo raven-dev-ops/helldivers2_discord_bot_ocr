@@ -89,7 +89,7 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
         return None
 
 ################################################
-# FUZZY MATCHING (IMPROVED)
+# FUZZY MATCHING (LENGTH-AWARE)
 ################################################
 
 def find_best_match(
@@ -100,7 +100,7 @@ def find_best_match(
 ) -> Tuple[Optional[str], Optional[float]]:
     """
     Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
-    Picks best candidate even if ambiguous, never skips.
+    Only considers matches within ±2 length. Picks closest length if ambiguous.
     """
     if not ocr_name or not registered_names:
         return None, None
@@ -119,9 +119,15 @@ def find_best_match(
         logger.info(f"Name '{ocr_name}' too short for fuzzy matching.")
         return None, None
 
-    # Fuzzy matching (normalized)
+    # Fuzzy matching (normalized, only similar length)
     norm_name_map = {normalize_name(n): n for n in registered_names}
-    norm_db_names = list(norm_name_map.keys())
+    norm_db_names = [
+        n for n in norm_name_map.keys()
+        if abs(len(n) - len(ocr_name_norm)) <= 2
+    ]
+    if not norm_db_names:
+        logger.info(f"No similar-length candidates for '{ocr_name}'.")
+        return None, None
 
     matches = process.extract(ocr_name_norm, norm_db_names, scorer=fuzz.partial_ratio, limit=3)
     matches = [(norm_name_map[m[0]], m[1]) for m in matches if m[1] >= threshold]
@@ -138,7 +144,7 @@ def find_best_match(
         return top_matches[0][0], top_matches[0][1]
     else:
         # If ambiguous, pick the candidate with the closest length, then log and pick first
-        best = min(top_matches, key=lambda m: abs(len(m[0]) - len(ocr_name)))
+        best = min(top_matches, key=lambda m: abs(len(normalize_name(m[0])) - len(ocr_name_norm)))
         logger.warning(f"Ambiguous matches for '{ocr_name}', picking '{best[0]}' from: {top_matches}")
         return best[0], best[1]
 
