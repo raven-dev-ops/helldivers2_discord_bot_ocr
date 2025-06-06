@@ -1,5 +1,3 @@
-# database.py
-
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Dict, Any, Tuple, Optional
@@ -24,7 +22,6 @@ server_listing_collection = db[SERVER_LISTING_COLLECTION]
 # We'll import the same 'clean_ocr_result' used by OCR to unify name cleaning
 from ocr_processing import clean_ocr_result
 
-
 ################################################
 # SERVER LISTING LOOKUPS
 ################################################
@@ -41,7 +38,6 @@ async def get_server_listing_by_id(discord_server_id: int) -> Optional[Dict[str,
     except Exception as e:
         logger.error(f"Error fetching Server_Listing for ID {discord_server_id}: {e}")
         return None
-
 
 ################################################
 # PLAYER REGISTRATION
@@ -84,16 +80,33 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
 # FUZZY MATCHING
 ################################################
 
-def find_best_match(ocr_name: str, registered_names: List[str], threshold: int = 50) -> Tuple[Optional[str], Optional[float]]:
+def find_best_match(
+    ocr_name: str,
+    registered_names: List[str],
+    threshold: int = 50,
+    min_len: int = 4
+) -> Tuple[Optional[str], Optional[float]]:
     """
-    Fuzzy match `ocr_name` against the list of `registered_names` using partial_ratio.
+    Fuzzy match `ocr_name` against the list of `registered_names`.
+    For names shorter than min_len, only allow case-insensitive exact match.
     Returns (best_match, match_score).
     """
     if not ocr_name or not registered_names:
         return None, None
 
+    ocr_name = ocr_name.strip()
     logger.debug(f"Attempting to find best match for OCR name '{ocr_name}'")
 
+    # If too short, require exact (case-insensitive) match only
+    if len(ocr_name) < min_len:
+        for db_name in registered_names:
+            if ocr_name.lower() == db_name.lower():
+                logger.info(f"Short name: exact match '{ocr_name}' == '{db_name}'")
+                return db_name, 100.0
+        logger.info(f"No exact match for short name '{ocr_name}'.")
+        return None, None
+
+    # Standard fuzzy matching for longer names
     match = process.extractOne(
         ocr_name,
         registered_names,
@@ -107,7 +120,6 @@ def find_best_match(ocr_name: str, registered_names: List[str], threshold: int =
     else:
         logger.info(f"No good match found for '{ocr_name}'.")
         return None, None
-
 
 ################################################
 # STATS INSERTION
@@ -136,7 +148,6 @@ async def insert_player_data(players_data: List[Dict[str, Any]], submitted_by: s
             logger.info(f"Inserted player data for {doc['player_name']}, submitted by {submitted_by}.")
         except Exception as e:
             logger.error(f"Failed to insert player data for {doc['player_name']}: {e}")
-
 
 ################################################
 # CLAN NAME LOOKUP

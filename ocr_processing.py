@@ -93,8 +93,8 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     """
     Extracts and cleans text for each player column present in the image.
     Only returns players with a valid name (not blank/junk).
+    Always places 'Shots Fired' and 'Shots Hit' as integers, even if OCR fails.
     """
-    # --- AUTO-DETECT NUMBER OF PLAYER COLUMNS PRESENT ---
     player_nums = []
     for key in regions.keys():
         match = re.match(r'P(\d+) Name', key)
@@ -107,7 +107,6 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     if max_player_index == 0:
         return []
 
-    # Determine how many player columns to process (2, 3, or 4)
     if NUM_PLAYERS is None or not isinstance(NUM_PLAYERS, int):
         NUM_PLAYERS = max(max_player_index, 2)
     NUM_PLAYERS = min(max(NUM_PLAYERS, 2), 4)  # always at least 2, at most 4
@@ -171,6 +170,12 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             else:
                 player_stats[label] = cleaned_result
 
+        # Ensure we ALWAYS set these (in case they were never found above)
+        if "Shots Fired" not in locals():
+            shots_fired = 0
+        if "Shots Hit" not in locals():
+            shots_hit = 0
+
         # Correct Shots Hit if bigger than Shots Fired
         if shots_hit > shots_fired:
             logger.warning(
@@ -198,23 +203,15 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
                 field_key = k
             formatted_player[field_key] = v
 
-        # Ensure Shots Fired, Shots Hit, Melee Kills are integers
-        try:
-            formatted_player["Shots Fired"] = int(formatted_player.get("Shots Fired", 0))
-        except Exception:
-            formatted_player["Shots Fired"] = 0
-        try:
-            formatted_player["Shots Hit"] = int(formatted_player.get("Shots Hit", 0))
-        except Exception:
-            formatted_player["Shots Hit"] = 0
+        # Ensure Shots Fired, Shots Hit, Melee Kills are integers, always present
+        formatted_player["Shots Fired"] = shots_fired
+        formatted_player["Shots Hit"] = shots_hit
+        formatted_player["Accuracy"] = f"{accuracy:.1f}%"
         try:
             formatted_player["Melee Kills"] = int(formatted_player.get("Melee Kills", 0))
         except Exception:
             formatted_player["Melee Kills"] = 0
 
-        formatted_player["Accuracy"] = f"{accuracy:.1f}%"
-
-        # Only append if the player_name is real (not blank, "0", ".", or "a")
         name_check = formatted_player.get("player_name", "").strip().lower()
         if name_check not in ["", "0", ".", "a"]:
             player_data.append(formatted_player)
