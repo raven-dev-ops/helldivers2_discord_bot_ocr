@@ -147,13 +147,17 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             elif key == "Shots Fired":
                 try:
                     shots_fired = int(cleaned_result)
-                except ValueError:
+                    player_stats[label] = shots_fired
+                except Exception:
                     shots_fired = 0
+                    player_stats[label] = 0
             elif key == "Shots Hit":
                 try:
                     shots_hit = int(cleaned_result)
-                except ValueError:
+                    player_stats[label] = shots_hit
+                except Exception:
                     shots_hit = 0
+                    player_stats[label] = 0
             elif key == "Accuracy":
                 try:
                     numeric_part = re.sub(r'[^0-9.]', '', cleaned_result.rstrip('%'))
@@ -161,8 +165,10 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
                         ocr_accuracy = float(numeric_part)
                     else:
                         ocr_accuracy = None
+                    player_stats[label] = cleaned_result
                 except ValueError:
                     ocr_accuracy = None
+                    player_stats[label] = "0"
             elif key == "Melee Kills":
                 try:
                     player_stats[label] = int(cleaned_result)
