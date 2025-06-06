@@ -446,9 +446,17 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
         players_data = await asyncio.to_thread(process_for_ocr, img_cv, regions)
         logger.info(f"Players data extracted: {players_data}")
 
-        if not players_data:
-            await interaction.followup.send("No valid player data found in the image.", ephemeral=True)
+        # Filter out rows with junk or missing player names
+        players_data = [
+            p for p in players_data
+            if p.get('player_name') and str(p.get('player_name')).strip() not in ["", "0", ".", "a"]
+        ]
+
+        # Check for minimum number of valid players
+        if len(players_data) < 2:
+            await interaction.followup.send("At least 2 players with valid names must be present in the image.", ephemeral=True)
             return
+
 
         # 5) Resolve recognized names -> DB
         registered_users = await get_registered_users()

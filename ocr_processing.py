@@ -140,28 +140,21 @@ def clean_ocr_result(text, label):
     return text
 
 def process_for_ocr(image, regions, NUM_PLAYERS=None):
-    """
-    Extracts text from the image for each player's stats,
-    then cleans it with clean_ocr_result().
-    Returns a list of dictionaries containing standardized keys:
-      ['player_name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy', 'Melee Kills']
-    Will only process player columns (P1, P2, ...) that are present.
-    """
+    """Extracts and cleans text for each player column present in the image."""
 
     # --- AUTO-DETECT NUMBER OF PLAYER COLUMNS PRESENT ---
-    if NUM_PLAYERS is None:
-        player_nums = []
-        for key in regions.keys():
-            match = re.match(r'P(\d+) Name', key)
-            if match:
-                player_nums.append(int(match.group(1)))
-        if player_nums:
-            NUM_PLAYERS = max(player_nums)
-        else:
-            NUM_PLAYERS = 4  # fallback
+    player_nums = []
+    for key in regions.keys():
+        match = re.match(r'P(\d+) Name', key)
+        if match:
+            player_nums.append(int(match.group(1)))
 
-    # Only allow 2, 3, or 4 player columns.
-    NUM_PLAYERS = min(max(NUM_PLAYERS, 2), 4)
+    # Determine max player index found, default to 0 if none found
+    max_player_index = max(player_nums) if player_nums else 0
+
+    # We will process up to this max index. Filtering for valid players happens later.
+    if max_player_index == 0:
+        return [] # No player names detected, return empty list
 
     player_data = []
 
@@ -175,7 +168,7 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             label = f"P{player_index + 1} {key}"
             segment = regions.get(label)
             if segment is None:
-                logger.error(f"Label {label} not found in regions.")
+                logger.debug(f"Label {label} not found in regions.") # Changed to debug
                 player_stats[label] = "0"
                 continue
 
