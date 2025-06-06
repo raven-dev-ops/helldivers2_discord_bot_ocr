@@ -20,20 +20,18 @@ registration_collection = db[REGISTRATION_COLLECTION]
 stats_collection = db[STATS_COLLECTION]
 server_listing_collection = db[SERVER_LISTING_COLLECTION]
 
-# We'll import the same 'clean_ocr_result' used by OCR to unify name cleaning
 from ocr_processing import clean_ocr_result
 
 def normalize_name(name: str) -> str:
     """
     Normalize player names for comparison:
     - Lowercase
-    - Remove spaces, underscores
-    - Remove trailing numbers
-    - Remove non-alpha chars (optional)
+    - Remove spaces and underscores
+    - Remove trailing numbers (for OCR artifacts like 'Ranjizoro 1')
+    - Keep all letters and numbers (so 'pi3' stays 'pi3')
     """
-    name = name.lower().replace(' ', '').replace('_', '')
-    name = re.sub(r'\d+$', '', name)  # Remove trailing numbers
-    name = re.sub(r'[^a-z]', '', name)  # Only keep a-z
+    name = str(name).lower().replace(' ', '').replace('_', '')
+    name = re.sub(r'\d+$', '', name)  # Remove only trailing numbers (NOT all numbers)
     return name
 
 ################################################
@@ -91,14 +89,14 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
         return None
 
 ################################################
-# FUZZY MATCHING (WITH NORMALIZATION)
+# FUZZY MATCHING (IMPROVED)
 ################################################
 
 def find_best_match(
     ocr_name: str,
     registered_names: List[str],
-    threshold: int = 50,
-    min_len: int = 4
+    threshold: int = 70,
+    min_len: int = 3
 ) -> Tuple[Optional[str], Optional[float]]:
     """
     Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
@@ -111,33 +109,35 @@ def find_best_match(
     ocr_name_norm = normalize_name(ocr_name.strip())
     logger.debug(f"Attempting to find best match for OCR name '{ocr_name}' (normalized '{ocr_name_norm}')")
 
-    # If too short, require exact (case-insensitive, normalized) match only
+    # Exact match pass (normalized)
+    for db_name in registered_names:
+        if ocr_name_norm == normalize_name(db_name):
+            logger.info(f"Exact match: '{ocr_name}' == '{db_name}'")
+            return db_name, 100.0
+
+    # For very short names, only allow exact match
     if len(ocr_name_norm) < min_len:
-        for db_name in registered_names:
-            db_norm = normalize_name(db_name)
-            if ocr_name_norm == db_norm:
-                logger.info(f"Short name: exact normalized match '{ocr_name}' == '{db_name}'")
-                return db_name, 100.0
-        logger.info(f"No exact normalized match for short name '{ocr_name}'.")
+        logger.info(f"Name '{ocr_name}' too short for fuzzy matching.")
         return None, None
 
-    # Fuzzy matching for longer names (normalized)
+    # Fuzzy matching (normalized)
     norm_name_map = {normalize_name(n): n for n in registered_names}
     norm_db_names = list(norm_name_map.keys())
 
-    match = process.extractOne(
-        ocr_name_norm,
-        norm_db_names,
-        scorer=fuzz.partial_ratio,
-        score_cutoff=threshold
-    )
-    if match:
-        norm_best, match_score = match[0], match[1]
-        best_match = norm_name_map[norm_best]
-        logger.info(f"Best match for '{ocr_name}' is '{best_match}' with a score of {match_score}.")
-        return best_match, match_score
+    matches = process.extract(ocr_name_norm, norm_db_names, scorer=fuzz.partial_ratio, limit=3)
+    matches = [(norm_name_map[m[0]], m[1]) for m in matches if m[1] >= threshold]
+    if not matches:
+        logger.info(f"No good fuzzy match found for '{ocr_name}'.")
+        return None, None
+
+    matches.sort(key=lambda x: -x[1])
+    top_score = matches[0][1]
+    top_matches = [m for m in matches if m[1] == top_score]
+    if len(top_matches) == 1:
+        logger.info(f"Fuzzy match for '{ocr_name}': '{top_matches[0][0]}' with score {top_matches[0][1]}")
+        return top_matches[0][0], top_matches[0][1]
     else:
-        logger.info(f"No good match found for '{ocr_name}'.")
+        logger.info(f"Ambiguous matches for '{ocr_name}', skipping: {top_matches}")
         return None, None
 
 ################################################
