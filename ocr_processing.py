@@ -115,8 +115,8 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     player_data = []
     for player_index in range(NUM_PLAYERS):
         player_stats = {}
-        shots_fired = None  # None for detection
-        shots_hit = None
+        shots_fired = 0
+        shots_hit = 0
         ocr_accuracy = None
 
         for key in ['Name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy', 'Melee Kills']:
@@ -171,12 +171,6 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             else:
                 player_stats[label] = cleaned_result
 
-        # Guarantee these fields are always present and integer
-        if shots_fired is None:
-            shots_fired = 0
-        if shots_hit is None:
-            shots_hit = 0
-
         # Correct Shots Hit if bigger than Shots Fired
         if shots_hit > shots_fired:
             logger.warning(
@@ -205,12 +199,19 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             formatted_player[field_key] = v
 
         # Ensure Shots Fired, Shots Hit, Melee Kills are integers
-        formatted_player["Shots Fired"] = int(shots_fired)
-        formatted_player["Shots Hit"] = int(shots_hit)
+        try:
+            formatted_player["Shots Fired"] = int(formatted_player.get("Shots Fired", 0))
+        except Exception:
+            formatted_player["Shots Fired"] = 0
+        try:
+            formatted_player["Shots Hit"] = int(formatted_player.get("Shots Hit", 0))
+        except Exception:
+            formatted_player["Shots Hit"] = 0
         try:
             formatted_player["Melee Kills"] = int(formatted_player.get("Melee Kills", 0))
         except Exception:
             formatted_player["Melee Kills"] = 0
+
         formatted_player["Accuracy"] = f"{accuracy:.1f}%"
 
         # Only append if the player_name is real (not blank, "0", ".", or "a")
@@ -224,18 +225,29 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     return player_data
 
 # =============================================================================
-# PARTIAL MATCHING LOGIC (OPTIONAL)
+# PARTIAL MATCHING LOGIC (WITH MINIMUM NAME LENGTH)
 # =============================================================================
 
-def find_best_partial_match(ocr_name: str, registered_names: list[str], threshold: float = 70.0):
-    """Fuzzy-matches an OCR'd name to a DB list, returns (best_match, best_score)."""
+def find_best_partial_match(ocr_name: str, registered_names: list[str], threshold: float = 70.0, min_len: int = 3):
+    """
+    Attempts to find the best partial match for 'ocr_name' within 'registered_names'.
+    Will not match if ocr_name is too short.
+    """
+    ocr_name = ocr_name.strip()
+    if len(ocr_name) < min_len:
+        return None, 0.0
+
     best_match = None
     best_score = 0.0
     ocr_name_lower = ocr_name.lower()
+
     for db_name in registered_names:
         db_name_lower = db_name.lower()
         ratio_full = SequenceMatcher(None, ocr_name_lower, db_name_lower).ratio() * 100
         substring_bonus = 20 if (ocr_name_lower in db_name_lower or db_name_lower in ocr_name_lower) else 0
+        # Extra check: skip wildly different lengths
+        if abs(len(ocr_name_lower) - len(db_name_lower)) > 3:
+            continue
         score = ratio_full + substring_bonus
         if score > best_score:
             best_score = score
