@@ -8,6 +8,7 @@ from config import (
 )
 from rapidfuzz import process, fuzz
 from datetime import datetime
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,19 @@ server_listing_collection = db[SERVER_LISTING_COLLECTION]
 
 # We'll import the same 'clean_ocr_result' used by OCR to unify name cleaning
 from ocr_processing import clean_ocr_result
+
+def normalize_name(name: str) -> str:
+    """
+    Normalize player names for comparison:
+    - Lowercase
+    - Remove spaces, underscores
+    - Remove trailing numbers
+    - Remove non-alpha chars (optional)
+    """
+    name = name.lower().replace(' ', '').replace('_', '')
+    name = re.sub(r'\d+$', '', name)  # Remove trailing numbers
+    name = re.sub(r'[^a-z]', '', name)  # Only keep a-z
+    return name
 
 ################################################
 # SERVER LISTING LOOKUPS
@@ -77,7 +91,7 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
         return None
 
 ################################################
-# FUZZY MATCHING
+# FUZZY MATCHING (WITH NORMALIZATION)
 ################################################
 
 def find_best_match(
@@ -87,34 +101,39 @@ def find_best_match(
     min_len: int = 4
 ) -> Tuple[Optional[str], Optional[float]]:
     """
-    Fuzzy match `ocr_name` against the list of `registered_names`.
-    For names shorter than min_len, only allow case-insensitive exact match.
+    Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
+    For names shorter than min_len, only allow case-insensitive exact match (normalized).
     Returns (best_match, match_score).
     """
     if not ocr_name or not registered_names:
         return None, None
 
-    ocr_name = ocr_name.strip()
-    logger.debug(f"Attempting to find best match for OCR name '{ocr_name}'")
+    ocr_name_norm = normalize_name(ocr_name.strip())
+    logger.debug(f"Attempting to find best match for OCR name '{ocr_name}' (normalized '{ocr_name_norm}')")
 
-    # If too short, require exact (case-insensitive) match only
-    if len(ocr_name) < min_len:
+    # If too short, require exact (case-insensitive, normalized) match only
+    if len(ocr_name_norm) < min_len:
         for db_name in registered_names:
-            if ocr_name.lower() == db_name.lower():
-                logger.info(f"Short name: exact match '{ocr_name}' == '{db_name}'")
+            db_norm = normalize_name(db_name)
+            if ocr_name_norm == db_norm:
+                logger.info(f"Short name: exact normalized match '{ocr_name}' == '{db_name}'")
                 return db_name, 100.0
-        logger.info(f"No exact match for short name '{ocr_name}'.")
+        logger.info(f"No exact normalized match for short name '{ocr_name}'.")
         return None, None
 
-    # Standard fuzzy matching for longer names
+    # Fuzzy matching for longer names (normalized)
+    norm_name_map = {normalize_name(n): n for n in registered_names}
+    norm_db_names = list(norm_name_map.keys())
+
     match = process.extractOne(
-        ocr_name,
-        registered_names,
+        ocr_name_norm,
+        norm_db_names,
         scorer=fuzz.partial_ratio,
         score_cutoff=threshold
     )
     if match:
-        best_match, match_score = match[0], match[1]
+        norm_best, match_score = match[0], match[1]
+        best_match = norm_name_map[norm_best]
         logger.info(f"Best match for '{ocr_name}' is '{best_match}' with a score of {match_score}.")
         return best_match, match_score
     else:
