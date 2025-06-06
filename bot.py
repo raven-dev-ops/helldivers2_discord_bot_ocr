@@ -1,5 +1,3 @@
-# bot.py
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -70,6 +68,17 @@ def validate_stat(field_name: str, raw_value: str):
         return f"{parsed:.1f}%"
     else:
         return raw_value
+
+def clean_for_match(name):
+    """
+    Lowercases, removes spaces, punctuation, and common prefixes for best matching.
+    """
+    if not name:
+        return ""
+    name = name.lower()
+    name = re.sub(r'[^a-z0-9]', '', name)  # Remove all non-alphanumeric
+    name = re.sub(r'^(mr|ms|mrs|dr)', '', name)  # Remove titles at start
+    return name
 
 ########################################
 # EMBEDS
@@ -305,7 +314,6 @@ class FieldSelect(discord.ui.Select):
 
                 if selected_field == 'player_name':
                     from database import get_registered_users, get_clan_name_by_discord_server_id
-                    # Attempt to fuzzy match again
                     cleaned_ocr_name = clean_ocr_result(new_value_str, 'Name')
                     if not cleaned_ocr_name:
                         player['player_name'] = None
@@ -313,18 +321,18 @@ class FieldSelect(discord.ui.Select):
                         player['discord_server_id'] = None
                         player['clan_name'] = "N/A"
                     else:
-                        # Re-fetch in case of changes
                         registered_users = await get_registered_users()
-
                         db_names = [u["player_name"] for u in registered_users]
+                        ocr_name_clean = clean_for_match(cleaned_ocr_name)
+                        db_names_clean = [clean_for_match(n) for n in db_names]
                         from database import find_best_match
                         best_match_cleaned, match_score = find_best_match(
-                            cleaned_ocr_name,
-                            [clean_ocr_result(n, 'Name') for n in db_names],
+                            ocr_name_clean,
+                            db_names_clean,
                             threshold=MATCH_SCORE_THRESHOLD
                         )
                         if best_match_cleaned and match_score >= MATCH_SCORE_THRESHOLD:
-                            idx = [clean_ocr_result(n, 'Name') for n in db_names].index(best_match_cleaned)
+                            idx = db_names_clean.index(best_match_cleaned)
                             matched_user = registered_users[idx]
                             player['player_name'] = matched_user["player_name"]
                             player['discord_id'] = matched_user.get("discord_id")
@@ -335,7 +343,6 @@ class FieldSelect(discord.ui.Select):
                             else:
                                 player['clan_name'] = "N/A"
                         else:
-                            # Unrecognized
                             player['player_name'] = None
                             player['discord_id'] = None
                             player['discord_server_id'] = None
@@ -379,7 +386,6 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
       4) Lets user confirm or edit stats before saving to DB.
       5) Posts final embed to the 'monitor_channel_id' from DB.
     """
-    # Must be used in a guild (not DM)
     if not interaction.guild_id:
         await interaction.response.send_message("This command cannot be used in DMs.", ephemeral=True)
         return
@@ -395,7 +401,7 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
 
     gpt_stat_access_role_id = server_data.get("gpt_stat_access_role_id")
     monitor_channel_id = server_data.get("monitor_channel_id")
-    gpt_channel_id = server_data.get("gpt_channel_id")  # used to reference if user is not registered
+    gpt_channel_id = server_data.get("gpt_channel_id")
 
     if not gpt_stat_access_role_id or not monitor_channel_id:
         await interaction.response.send_message(
@@ -413,7 +419,6 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
         )
         return
 
-    # Defer the response (ephemeral)
     await interaction.response.defer(ephemeral=True)
     submitter_discord_id = interaction.user.id
 
@@ -421,7 +426,6 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
     submitter_user = await get_registered_user_by_discord_id(submitter_discord_id)
     submitter_player_name = submitter_user.get('player_name', 'Unknown') if submitter_user else 'Unknown'
 
-    # Validate image file extension
     if not any(image.filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS):
         await interaction.followup.send("Please upload a valid image file (png, jpg, jpeg).", ephemeral=True)
         return
@@ -447,26 +451,36 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
         players_data = await asyncio.to_thread(process_for_ocr, img_cv, regions)
         logger.info(f"Players data extracted: {players_data}")
 
-        # Filter out rows with junk or missing player names (basic filter)
+        # Filter out rows with junk or missing player names
         players_data = [
             p for p in players_data
             if p.get('player_name') and str(p.get('player_name')).strip() not in ["", "0", ".", "a"]
         ]
+
+        # Check for minimum number of valid players
+        if len(players_data) < 2:
+            await interaction.followup.send("At least 2 players with valid names must be present in the image.", ephemeral=True)
+            return
 
         # 5) Resolve recognized names -> DB
         registered_users = await get_registered_users()
         for player in players_data:
             ocr_name = player.get('player_name')
             if ocr_name:
+                from database import find_best_match
                 cleaned_ocr = clean_ocr_result(ocr_name, 'Name')
+
+                # --- CLEAN BOTH NAMES BEFORE MATCHING ---
                 db_names = [u["player_name"] for u in registered_users]
+                ocr_name_clean = clean_for_match(cleaned_ocr)
+                db_names_clean = [clean_for_match(n) for n in db_names]
                 best_match_cleaned, match_score = find_best_match(
-                    cleaned_ocr,
-                    [clean_ocr_result(n, 'Name') for n in db_names],
+                    ocr_name_clean,
+                    db_names_clean,
                     threshold=MATCH_SCORE_THRESHOLD
                 )
                 if best_match_cleaned and match_score is not None and match_score >= MATCH_SCORE_THRESHOLD:
-                    idx = [clean_ocr_result(n, 'Name') for n in db_names].index(best_match_cleaned)
+                    idx = db_names_clean.index(best_match_cleaned)
                     matched_user = registered_users[idx]
                     player['player_name'] = matched_user["player_name"]
                     player['discord_id'] = matched_user.get("discord_id")
@@ -487,13 +501,14 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
                 player['discord_server_id'] = None
                 player['clan_name'] = "N/A"
 
-        # 6) REMOVE unregistered/unmatched players (only keep registered)
+        # Only keep matched (registered) players for all further steps:
         players_data = [p for p in players_data if p.get('player_name')]
 
-        # Check for minimum number of valid registered players
+        # Check for minimum number of registered players
         if len(players_data) < 2:
             await interaction.followup.send(
-                "At least 2 **registered** players with valid names must be present in the image.",
+                "At least 2 registered players must be detected in the image. "
+                "All reported players must be registered in the database.",
                 ephemeral=True
             )
             return
