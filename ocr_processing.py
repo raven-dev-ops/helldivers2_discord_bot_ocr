@@ -1,5 +1,3 @@
-# ocr_processing.py
-
 import logging
 import re
 import cv2
@@ -141,13 +139,30 @@ def clean_ocr_result(text, label):
 
     return text
 
-def process_for_ocr(image, regions, NUM_PLAYERS=4):
+def process_for_ocr(image, regions, NUM_PLAYERS=None):
     """
     Extracts text from the image for each player's stats,
     then cleans it with clean_ocr_result().
     Returns a list of dictionaries containing standardized keys:
-      ['player_name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy']
+      ['player_name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy', 'Melee Kills']
+    Will only process player columns (P1, P2, ...) that are present.
     """
+
+    # --- AUTO-DETECT NUMBER OF PLAYER COLUMNS PRESENT ---
+    if NUM_PLAYERS is None:
+        player_nums = []
+        for key in regions.keys():
+            match = re.match(r'P(\d+) Name', key)
+            if match:
+                player_nums.append(int(match.group(1)))
+        if player_nums:
+            NUM_PLAYERS = max(player_nums)
+        else:
+            NUM_PLAYERS = 4  # fallback
+
+    # Only allow 2, 3, or 4 player columns.
+    NUM_PLAYERS = min(max(NUM_PLAYERS, 2), 4)
+
     player_data = []
 
     for player_index in range(NUM_PLAYERS):
@@ -156,7 +171,7 @@ def process_for_ocr(image, regions, NUM_PLAYERS=4):
         shots_hit = 0
         ocr_accuracy = None
 
-        for key in ['Name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy']:
+        for key in ['Name', 'Kills', 'Shots Fired', 'Shots Hit', 'Deaths', 'Accuracy', 'Melee Kills']:
             label = f"P{player_index + 1} {key}"
             segment = regions.get(label)
             if segment is None:
@@ -197,6 +212,8 @@ def process_for_ocr(image, regions, NUM_PLAYERS=4):
                     ocr_accuracy = float(cleaned_result.rstrip('%'))
                 except ValueError:
                     ocr_accuracy = None
+            elif key == "Melee Kills":
+                player_stats[label] = cleaned_result
             else:
                 player_stats[label] = cleaned_result
 
@@ -236,9 +253,9 @@ def process_for_ocr(image, regions, NUM_PLAYERS=4):
         formatted_player["Accuracy"] = f"{accuracy:.1f}%"
 
         player_data.append(formatted_player)
+        logger.debug(f"OCR extracted for player {player_index + 1}: {formatted_player}")
 
     return player_data
-
 
 # =============================================================================
 # PARTIAL MATCHING LOGIC (OPTIONAL)
