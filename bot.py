@@ -127,6 +127,7 @@ def build_monitor_embed(players_data: list, submitter_name: str) -> discord.Embe
         shots_fired = str(player.get('Shots Fired', 'N/A'))
         shots_hit = str(player.get('Shots Hit', 'N/A'))
         accuracy = str(player.get('Accuracy', 'N/A'))
+        melee_kills = str(player.get('Melee Kills', 'N/A'))
         final_info = (
             f"**Name**: {player_name}\n"
             f"**Clan**: {clan_name}\n"
@@ -446,24 +447,17 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
         players_data = await asyncio.to_thread(process_for_ocr, img_cv, regions)
         logger.info(f"Players data extracted: {players_data}")
 
-        # Filter out rows with junk or missing player names
+        # Filter out rows with junk or missing player names (basic filter)
         players_data = [
             p for p in players_data
             if p.get('player_name') and str(p.get('player_name')).strip() not in ["", "0", ".", "a"]
         ]
-
-        # Check for minimum number of valid players
-        if len(players_data) < 2:
-            await interaction.followup.send("At least 2 players with valid names must be present in the image.", ephemeral=True)
-            return
-
 
         # 5) Resolve recognized names -> DB
         registered_users = await get_registered_users()
         for player in players_data:
             ocr_name = player.get('player_name')
             if ocr_name:
-                from database import find_best_match
                 cleaned_ocr = clean_ocr_result(ocr_name, 'Name')
                 db_names = [u["player_name"] for u in registered_users]
                 best_match_cleaned, match_score = find_best_match(
@@ -493,21 +487,13 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
                 player['discord_server_id'] = None
                 player['clan_name'] = "N/A"
 
-        # 6) Check if any players are unregistered
-        unregistered_indices = []
-        for idx, p in enumerate(players_data):
-            if p.get('player_name') is None:
-                unregistered_indices.append(idx + 1)
+        # 6) REMOVE unregistered/unmatched players (only keep registered)
+        players_data = [p for p in players_data if p.get('player_name')]
 
-        if unregistered_indices:
+        # Check for minimum number of valid registered players
+        if len(players_data) < 2:
             await interaction.followup.send(
-                content=(
-                    "**Unknown Helldiver Detected:**\n"
-                    f"Player {', '.join(map(str, unregistered_indices))} is not registered "
-                    f"or name did not match.\n"
-                    f"They must visit <#{gpt_channel_id}> to register before stats can be submitted.\n\n"
-                    "Stay Free!"
-                ),
+                "At least 2 **registered** players with valid names must be present in the image.",
                 ephemeral=True
             )
             return
