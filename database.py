@@ -100,8 +100,7 @@ def find_best_match(
 ) -> Tuple[Optional[str], Optional[float]]:
     """
     Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
-    For names shorter than min_len, only allow case-insensitive exact match (normalized).
-    Returns (best_match, match_score).
+    Picks best candidate even if ambiguous, never skips.
     """
     if not ocr_name or not registered_names:
         return None, None
@@ -133,12 +132,15 @@ def find_best_match(
     matches.sort(key=lambda x: -x[1])
     top_score = matches[0][1]
     top_matches = [m for m in matches if m[1] == top_score]
+
     if len(top_matches) == 1:
         logger.info(f"Fuzzy match for '{ocr_name}': '{top_matches[0][0]}' with score {top_matches[0][1]}")
         return top_matches[0][0], top_matches[0][1]
     else:
-        logger.info(f"Ambiguous matches for '{ocr_name}', skipping: {top_matches}")
-        return None, None
+        # If ambiguous, pick the candidate with the closest length, then log and pick first
+        best = min(top_matches, key=lambda m: abs(len(m[0]) - len(ocr_name)))
+        logger.warning(f"Ambiguous matches for '{ocr_name}', picking '{best[0]}' from: {top_matches}")
+        return best[0], best[1]
 
 ################################################
 # STATS INSERTION
