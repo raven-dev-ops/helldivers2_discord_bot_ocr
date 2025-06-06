@@ -52,7 +52,7 @@ def perform_ocr(segment, label):
         for preprocess in preprocessing_methods:
             preprocessed_segment = preprocess(segment)
             text = pytesseract.image_to_string(preprocessed_segment, config=custom_config).strip()
-            logger.debug(f"OCR raw text for label '{label}': '{text}'")
+            logger.info(f"OCR raw text for label '{label}': '{text}'")  # <--- LOGGING RAW OCR
             if text:
                 return text
         return None
@@ -65,7 +65,7 @@ def clean_ocr_result(text, label):
     if not text:
         return None
 
-    logger.debug(f"Original text for label '{label}': '{text}'")
+    logger.info(f"Original text for label '{label}': '{text}'")  # <--- LOGGING CLEAN INPUT
 
     if label == "Name":
         misreads = {
@@ -78,11 +78,18 @@ def clean_ocr_result(text, label):
         text = re.sub(r'([A-Za-z0-9])([A-Z])$', r'\1', text)
         text = re.sub(r'\s+', ' ', text).strip()
         text = re.sub(r'[^A-Za-z0-9\s]', ' ', text)
+    elif label in ["Shots Fired", "Shots Hit", "Kills", "Deaths", "Melee Kills"]:
+        # Aggressive OCR correction for digits
+        text = (text.replace('O', '0').replace('o', '0')
+                    .replace('l', '1').replace('I', '1')
+                    .replace('B', '8').replace('S', '5'))
+        text = re.sub(r'[^\d]', '', text)
+    elif label == "Accuracy":
+        text = re.sub(r'[^\d\.%]', '', text)
     else:
-        if label == "Accuracy":
-            text = re.sub(r'[^\d\.%]', '', text)
-        else:
-            text = re.sub(r'[^\d]', '', text)
+        text = re.sub(r'[^\d]', '', text)
+
+    logger.info(f"Cleaned text for label '{label}': '{text}'")  # <--- LOGGING CLEANED OUTPUT
 
     if not text:
         return None
@@ -93,8 +100,8 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     """
     Extracts and cleans text for each player column present in the image.
     Only returns players with a valid name (not blank/junk).
-    Always places 'Shots Fired' and 'Shots Hit' as integers, even if OCR fails.
     """
+    # --- AUTO-DETECT NUMBER OF PLAYER COLUMNS PRESENT ---
     player_nums = []
     for key in regions.keys():
         match = re.match(r'P(\d+) Name', key)
@@ -107,6 +114,7 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
     if max_player_index == 0:
         return []
 
+    # Determine how many player columns to process (2, 3, or 4)
     if NUM_PLAYERS is None or not isinstance(NUM_PLAYERS, int):
         NUM_PLAYERS = max(max_player_index, 2)
     NUM_PLAYERS = min(max(NUM_PLAYERS, 2), 4)  # always at least 2, at most 4
@@ -170,12 +178,6 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
             else:
                 player_stats[label] = cleaned_result
 
-        # Ensure we ALWAYS set these (in case they were never found above)
-        if "Shots Fired" not in locals():
-            shots_fired = 0
-        if "Shots Hit" not in locals():
-            shots_hit = 0
-
         # Correct Shots Hit if bigger than Shots Fired
         if shots_hit > shots_fired:
             logger.warning(
@@ -203,15 +205,23 @@ def process_for_ocr(image, regions, NUM_PLAYERS=None):
                 field_key = k
             formatted_player[field_key] = v
 
-        # Ensure Shots Fired, Shots Hit, Melee Kills are integers, always present
-        formatted_player["Shots Fired"] = shots_fired
-        formatted_player["Shots Hit"] = shots_hit
-        formatted_player["Accuracy"] = f"{accuracy:.1f}%"
+        # Ensure Shots Fired, Shots Hit, Melee Kills are integers
+        try:
+            formatted_player["Shots Fired"] = shots_fired
+        except Exception:
+            formatted_player["Shots Fired"] = 0
+        try:
+            formatted_player["Shots Hit"] = shots_hit
+        except Exception:
+            formatted_player["Shots Hit"] = 0
         try:
             formatted_player["Melee Kills"] = int(formatted_player.get("Melee Kills", 0))
         except Exception:
             formatted_player["Melee Kills"] = 0
 
+        formatted_player["Accuracy"] = f"{accuracy:.1f}%"
+
+        # Only append if the player_name is real (not blank, "0", ".", or "a")
         name_check = formatted_player.get("player_name", "").strip().lower()
         if name_check not in ["", "0", ".", "a"]:
             player_data.append(formatted_player)
@@ -235,7 +245,9 @@ def find_best_partial_match(ocr_name: str, registered_names: list[str], threshol
         # Only allow exact (case-insensitive) match if the name is very short
         for db_name in registered_names:
             if ocr_name.lower() == db_name.lower():
+                logger.info(f"Exact match for short name '{ocr_name}'.")
                 return db_name, 100.0
+        logger.info(f"No exact match for short name '{ocr_name}'.")
         return None, 0.0
 
     best_match = None
@@ -246,11 +258,9 @@ def find_best_partial_match(ocr_name: str, registered_names: list[str], threshol
         db_name_lower = db_name.lower()
         ratio_full = SequenceMatcher(None, ocr_name_lower, db_name_lower).ratio() * 100
         substring_bonus = 0
-        # Only give substring bonus if both names are at least min_len chars
         if len(ocr_name_lower) >= min_len and len(db_name_lower) >= min_len:
             if ocr_name_lower in db_name_lower or db_name_lower in ocr_name_lower:
                 substring_bonus = 20
-        # Also skip if wildly different lengths (optional, for extra safety)
         if abs(len(ocr_name_lower) - len(db_name_lower)) > 3:
             continue
         score = ratio_full + substring_bonus
