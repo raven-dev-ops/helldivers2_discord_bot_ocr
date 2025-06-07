@@ -254,7 +254,7 @@ class PlayerSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.shared_data.selected_player_index = int(self.values[0])
-            fields = ['player_name', 'Kills', 'Accuracy', 'Shots Fired', 'Shots Hit', 'Deaths']
+            fields = ['player_name', 'Kills', 'Accuracy', 'Shots Fired', 'Shots Hit', 'Deaths', 'Melee Kills']
             field_options = [discord.SelectOption(label=f) for f in fields]
 
             field_select = FieldSelect(field_options, self.shared_data)
