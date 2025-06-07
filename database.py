@@ -164,6 +164,7 @@ async def insert_player_data(players_data: List[Dict[str, Any]], submitted_by: s
             "Shots Fired": player.get("Shots Fired", "N/A"),
             "Shots Hit": player.get("Shots Hit", "N/A"),
             "Deaths": player.get("Deaths", "N/A"),
+            "Melee Kills": player.get("Melee Kills", "N/A"),  # <-- Add this line
             "discord_id": player.get("discord_id", None),
             "discord_server_id": player.get("discord_server_id", None),
             "clan_name": player.get("clan_name", "N/A"),
