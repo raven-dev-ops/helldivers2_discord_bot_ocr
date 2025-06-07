@@ -94,20 +94,19 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
         return None
 
 ################################################
-# FUZZY MATCHING (LENGTH-AWARE, ENHANCED)
+# FUZZY MATCHING (LENGTH-AWARE + RATIO)
 ################################################
 
 def find_best_match(
     ocr_name: str,
     registered_names: List[str],
-    threshold: int = 70,
+    threshold: int = 80,  # Stricter threshold
     min_len: int = 3
 ) -> Tuple[Optional[str], Optional[float]]:
     """
-    Improved fuzzy match for OCR'd names vs registered player names.
-    - Uses aggressive normalization
-    - Uses partial_ratio and token_sort_ratio from rapidfuzz
-    - Substring fallback if nothing else matches
+    Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
+    Only considers matches within ±3 length AND with length ratio between 0.75 and 1.25.
+    Uses both partial_ratio and token_sort_ratio. No substring fallback.
     """
     if not ocr_name or not registered_names:
         return None, None
@@ -115,12 +114,14 @@ def find_best_match(
     ocr_name_norm = normalize_name(ocr_name.strip())
     logger.debug(f"Attempting to find best match for OCR name '{ocr_name}' (normalized '{ocr_name_norm}')")
 
-    # Map normalized names to original
     norm_name_map = {normalize_name(n): n for n in registered_names}
-    norm_db_names = [
-        n for n in norm_name_map.keys()
-        if abs(len(n) - len(ocr_name_norm)) <= 3
-    ]
+    norm_db_names = []
+    for n in norm_name_map.keys():
+        abs_len_diff = abs(len(n) - len(ocr_name_norm))
+        length_ratio = len(n) / len(ocr_name_norm) if len(ocr_name_norm) > 0 else 1.0
+        # Accept if within ±3 chars AND ratio between 0.75–1.25
+        if abs_len_diff <= 3 and 0.75 <= length_ratio <= 1.25:
+            norm_db_names.append(n)
 
     # Exact match (normalized)
     for n in norm_db_names:
@@ -146,12 +147,6 @@ def find_best_match(
         matches.sort(key=lambda x: -x[1])
         logger.info(f"Fuzzy match for '{ocr_name}': '{matches[0][0]}' with score {matches[0][1]}")
         return matches[0][0], matches[0][1]
-
-    # Substring fallback for longer names
-    for n in norm_db_names:
-        if ocr_name_norm in n or n in ocr_name_norm:
-            logger.warning(f"Substring fallback match: '{ocr_name}' ~ '{norm_name_map[n]}'")
-            return norm_name_map[n], 60  # Arbitrary fallback score
 
     logger.info(f"No good fuzzy match found for '{ocr_name}'.")
     return None, None
