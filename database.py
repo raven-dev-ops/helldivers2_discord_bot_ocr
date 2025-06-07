@@ -24,14 +24,19 @@ from ocr_processing import clean_ocr_result
 
 def normalize_name(name: str) -> str:
     """
-    Normalize player names for comparison:
+    Aggressive normalization for fuzzy player name matching:
     - Lowercase
-    - Remove spaces and underscores
-    - Remove trailing numbers (for OCR artifacts like 'Ranjizoro 1')
-    - Keep all letters and numbers (so 'pi3' stays 'pi3')
+    - Remove anything in <>
+    - Remove leading/trailing numbers/underscores
+    - Remove non-alphanumeric chars (keep only a-z, 0-9)
     """
-    name = str(name).lower().replace(' ', '').replace('_', '')
-    name = re.sub(r'\d+$', '', name)  # Remove only trailing numbers (NOT all numbers)
+    name = str(name).lower()
+    # Remove anything in angle brackets, e.g. <#000>
+    name = re.sub(r"<.*?>", "", name)
+    # Remove leading/trailing numbers and underscores
+    name = re.sub(r'^[\d_]+|[\d_]+$', '', name)
+    # Remove all non-alphanumeric characters
+    name = re.sub(r'[^a-z0-9]', '', name)
     return name
 
 ################################################
@@ -89,7 +94,7 @@ async def get_registered_user_by_discord_id(discord_id: int) -> Optional[Dict[st
         return None
 
 ################################################
-# FUZZY MATCHING (LENGTH-AWARE)
+# FUZZY MATCHING (LENGTH-AWARE, ENHANCED)
 ################################################
 
 def find_best_match(
@@ -99,8 +104,10 @@ def find_best_match(
     min_len: int = 3
 ) -> Tuple[Optional[str], Optional[float]]:
     """
-    Fuzzy match `ocr_name` against the list of `registered_names` (normalized).
-    Only considers matches within ±2 length. Picks closest length if ambiguous.
+    Improved fuzzy match for OCR'd names vs registered player names.
+    - Uses aggressive normalization
+    - Uses partial_ratio and token_sort_ratio from rapidfuzz
+    - Substring fallback if nothing else matches
     """
     if not ocr_name or not registered_names:
         return None, None
@@ -108,45 +115,46 @@ def find_best_match(
     ocr_name_norm = normalize_name(ocr_name.strip())
     logger.debug(f"Attempting to find best match for OCR name '{ocr_name}' (normalized '{ocr_name_norm}')")
 
-    # Exact match pass (normalized)
-    for db_name in registered_names:
-        if ocr_name_norm == normalize_name(db_name):
-            logger.info(f"Exact match: '{ocr_name}' == '{db_name}'")
-            return db_name, 100.0
+    # Map normalized names to original
+    norm_name_map = {normalize_name(n): n for n in registered_names}
+    norm_db_names = [
+        n for n in norm_name_map.keys()
+        if abs(len(n) - len(ocr_name_norm)) <= 3
+    ]
+
+    # Exact match (normalized)
+    for n in norm_db_names:
+        if ocr_name_norm == n:
+            logger.info(f"Exact match: '{ocr_name}' == '{norm_name_map[n]}'")
+            return norm_name_map[n], 100.0
 
     # For very short names, only allow exact match
     if len(ocr_name_norm) < min_len:
         logger.info(f"Name '{ocr_name}' too short for fuzzy matching.")
         return None, None
 
-    # Fuzzy matching (normalized, only similar length)
-    norm_name_map = {normalize_name(n): n for n in registered_names}
-    norm_db_names = [
-        n for n in norm_name_map.keys()
-        if abs(len(n) - len(ocr_name_norm)) <= 2
-    ]
-    if not norm_db_names:
-        logger.info(f"No similar-length candidates for '{ocr_name}'.")
-        return None, None
+    # Fuzzy matching using both partial_ratio and token_sort_ratio
+    candidates = []
+    for n in norm_db_names:
+        pr_score = fuzz.partial_ratio(ocr_name_norm, n)
+        ts_score = fuzz.token_sort_ratio(ocr_name_norm, n)
+        max_score = max(pr_score, ts_score)
+        candidates.append((n, max_score))
 
-    matches = process.extract(ocr_name_norm, norm_db_names, scorer=fuzz.partial_ratio, limit=3)
-    matches = [(norm_name_map[m[0]], m[1]) for m in matches if m[1] >= threshold]
-    if not matches:
-        logger.info(f"No good fuzzy match found for '{ocr_name}'.")
-        return None, None
+    matches = [(norm_name_map[m[0]], m[1]) for m in candidates if m[1] >= threshold]
+    if matches:
+        matches.sort(key=lambda x: -x[1])
+        logger.info(f"Fuzzy match for '{ocr_name}': '{matches[0][0]}' with score {matches[0][1]}")
+        return matches[0][0], matches[0][1]
 
-    matches.sort(key=lambda x: -x[1])
-    top_score = matches[0][1]
-    top_matches = [m for m in matches if m[1] == top_score]
+    # Substring fallback for longer names
+    for n in norm_db_names:
+        if ocr_name_norm in n or n in ocr_name_norm:
+            logger.warning(f"Substring fallback match: '{ocr_name}' ~ '{norm_name_map[n]}'")
+            return norm_name_map[n], 60  # Arbitrary fallback score
 
-    if len(top_matches) == 1:
-        logger.info(f"Fuzzy match for '{ocr_name}': '{top_matches[0][0]}' with score {top_matches[0][1]}")
-        return top_matches[0][0], top_matches[0][1]
-    else:
-        # If ambiguous, pick the candidate with the closest length, then log and pick first
-        best = min(top_matches, key=lambda m: abs(len(normalize_name(m[0])) - len(ocr_name_norm)))
-        logger.warning(f"Ambiguous matches for '{ocr_name}', picking '{best[0]}' from: {top_matches}")
-        return best[0], best[1]
+    logger.info(f"No good fuzzy match found for '{ocr_name}'.")
+    return None, None
 
 ################################################
 # STATS INSERTION
@@ -164,7 +172,7 @@ async def insert_player_data(players_data: List[Dict[str, Any]], submitted_by: s
             "Shots Fired": player.get("Shots Fired", "N/A"),
             "Shots Hit": player.get("Shots Hit", "N/A"),
             "Deaths": player.get("Deaths", "N/A"),
-            "Melee Kills": player.get("Melee Kills", "N/A"),  # <-- Add this line
+            "Melee Kills": player.get("Melee Kills", "N/A"),
             "discord_id": player.get("discord_id", None),
             "discord_server_id": player.get("discord_server_id", None),
             "clan_name": player.get("clan_name", "N/A"),
