@@ -155,7 +155,16 @@ def build_monitor_embed(players_data: list, submitter_name: str) -> discord.Embe
 ########################################
 
 class SharedData:
-    def __init__(self, players_data, submitter_player_name, registered_users, monitor_channel_id):
+    def __init__(
+        self,
+        players_data,
+        submitter_player_name,
+        registered_users,
+        monitor_channel_id,
+        screenshot_bytes=None,
+        screenshot_filename=None
+    ):
+
         self.players_data = players_data
         self.submitter_player_name = submitter_player_name
         self.registered_users = registered_users
@@ -165,6 +174,8 @@ class SharedData:
         self.selected_field = None
         self.message = None
         self.view = None
+        self.screenshot_bytes = screenshot_bytes
+        self.screenshot_filename = screenshot_filename
 
 class ConfirmationView(discord.ui.View):
     def __init__(self, shared_data):
@@ -194,8 +205,12 @@ class ConfirmationView(discord.ui.View):
             # Post to #monitor
             monitor_embed = build_monitor_embed(
                 self.shared_data.players_data,
-                self.shared_data.submitter_player_name
+ self.shared_data.submitter_player_name
             )
+            file_to_send = None
+            if self.shared_data.screenshot_bytes and self.shared_data.screenshot_filename:
+ file_to_send = discord.File(BytesIO(self.shared_data.screenshot_bytes), filename=self.shared_data.screenshot_filename)
+
 
             monitor_channel = bot.get_channel(self.shared_data.monitor_channel_id)
             if monitor_channel:
@@ -515,7 +530,13 @@ async def extract(interaction: discord.Interaction, image: discord.Attachment):
 
         # 7) Build ephemeral embed for user confirmation
         single_embed = build_single_embed(players_data, submitter_player_name)
-        shared_data = SharedData(players_data, submitter_player_name, registered_users, monitor_channel_id)
+        shared_data = SharedData(
+            players_data,
+            submitter_player_name,
+            registered_users,
+            monitor_channel_id,
+            screenshot_bytes=img_bytes,
+            screenshot_filename=image.filename)
         view = ConfirmationView(shared_data)
         shared_data.view = view
 
