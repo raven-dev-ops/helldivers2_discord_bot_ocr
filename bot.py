@@ -189,15 +189,16 @@ class ConfirmationView(discord.ui.View):
         """
         try:
             await interaction.response.defer(ephemeral=True)
-            
+
             # If any zero or 'Needs Confirmation' fields remain, warn
             if any(highlight_zero_values(p) for p in self.shared_data.players_data):
                 await interaction.followup.send(
                     "Some values are zero or missing. Please EDIT them before confirming.",
                     ephemeral=True
                 )
-                return 
+                return
 
+            from io import BytesIO
             # Insert to DB
             from database import insert_player_data
             await insert_player_data(self.shared_data.players_data, self.shared_data.submitter_player_name)
@@ -205,11 +206,16 @@ class ConfirmationView(discord.ui.View):
             # Post to #monitor
             monitor_embed = build_monitor_embed( 
                 self.shared_data.players_data,
- self.shared_data.submitter_player_name
+                self.shared_data.submitter_player_name
             )
             file_to_send = None
             if self.shared_data.screenshot_bytes and self.shared_data.screenshot_filename:
- file_to_send = discord.File(BytesIO(self.shared_data.screenshot_bytes), filename=self.shared_data.screenshot_filename)
+                file_to_send = discord.File(BytesIO(self.shared_data.screenshot_bytes), filename=self.shared_data.screenshot_filename)
+
+            monitor_channel = bot.get_channel(self.shared_data.monitor_channel_id)
+            if monitor_channel:
+                await monitor_channel.send(embed=monitor_embed, file=file_to_send)
+            else:
 
 
             monitor_channel = bot.get_channel(self.shared_data.monitor_channel_id)
