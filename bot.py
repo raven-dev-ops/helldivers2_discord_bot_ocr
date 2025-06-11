@@ -214,12 +214,6 @@ class ConfirmationView(discord.ui.View):
 
             monitor_channel = bot.get_channel(self.shared_data.monitor_channel_id)
             if monitor_channel:
-                await monitor_channel.send(embed=monitor_embed, file=file_to_send)
-            else:
-
-
-            monitor_channel = bot.get_channel(self.shared_data.monitor_channel_id)
-            if monitor_channel:
                 await monitor_channel.send(embed=monitor_embed)
             else:
                 logger.error("Monitor channel not found or invalid ID in DB.")
@@ -230,6 +224,7 @@ class ConfirmationView(discord.ui.View):
                 embeds=[],
                 view=None
             )
+
         except Exception as e:
             logger.error(f"Error in YES button callback: {e}")
             await interaction.followup.send("Error while confirming data.", ephemeral=True)
