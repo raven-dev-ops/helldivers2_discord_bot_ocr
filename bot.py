@@ -189,21 +189,21 @@ class ConfirmationView(discord.ui.View):
         """
         try:
             await interaction.response.defer(ephemeral=True)
-
+            
             # If any zero or 'Needs Confirmation' fields remain, warn
             if any(highlight_zero_values(p) for p in self.shared_data.players_data):
                 await interaction.followup.send(
                     "Some values are zero or missing. Please EDIT them before confirming.",
                     ephemeral=True
                 )
-                return
+                return 
 
             # Insert to DB
             from database import insert_player_data
             await insert_player_data(self.shared_data.players_data, self.shared_data.submitter_player_name)
 
             # Post to #monitor
-            monitor_embed = build_monitor_embed(
+            monitor_embed = build_monitor_embed( 
                 self.shared_data.players_data,
  self.shared_data.submitter_player_name
             )
